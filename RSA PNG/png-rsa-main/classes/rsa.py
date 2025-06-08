@@ -95,11 +95,11 @@ class RSA:
     def xor_bytes(a, b):
         return bytes(x ^ y for x, y in zip(a,b))
     
-    def encryptECB(data, pubkey):
-        return RSA.encryptData(data, pubkey)
+    def encryptECB(data, key):
+        return RSA.encryptData(data, key)
     
-    def decryptECB(data, privkey):
-        return RSA.decryptData(data, privkey)
+    def decryptECB(data, key):
+        return RSA.decryptData(data, key)
     
     def encryptCBC(data, pubkey, iv):
         n, e = pubkey
