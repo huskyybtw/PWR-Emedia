@@ -1,5 +1,7 @@
+import os
 import random
-from math import gcd
+import datetime
+from classes.png import PNG
 
 class RSA:
     # Function used to encrypt a block of data using a provided pubkey
@@ -17,7 +19,6 @@ class RSA:
             pad_len = chunk_len
         padding = bytes([pad_len]) * pad_len
         data += padding
-
 
         encrypted = bytearray()
         
@@ -47,9 +48,16 @@ class RSA:
         orig_len = int.from_bytes(decrypted[:4], 'big')
         return decrypted[4:4+orig_len]
 
+    def encryptByte(byte, pubkey):
+        n, e = pubkey
+        return pow(byte, e, n)
 
-    def generateKeypair():
-        primes = RSA.getPrimes(2)
+    def decryptByte(byte, privkey):
+        n, d = privkey
+        return pow(byte, d, n)
+    
+    def generateKeypair(bits):
+        primes = RSA.getPrimes(2, bits // 2)
 
         n = primes[0] * primes[1]
         phi_n = (primes[0]-1) * (primes[1]-1)
@@ -61,36 +69,67 @@ class RSA:
 
         return pubkey, privkey
     
-    def checkPrime(n):
+    # Probabilistyczna metoda sprawdzania liczb pierwszych (Miller–Rabin primality test)
+    def checkPrime(n, k=5):
         if n <= 1:
             return False
-        for i in range(2, int(n**0.5) + 1):
-            if n % i == 0:
+        if n <= 3:
+            return True
+        if n % 2 == 0:
+            return False
+
+        # Write n-1 as 2^r * d
+        r, d = 0, n - 1
+        while d % 2 == 0:
+            d //= 2
+            r += 1
+
+        # Perform k rounds of testing
+        for _ in range(k):
+            a = random.randrange(2, n - 2)
+            x = pow(a, d, n)
+            if x == 1 or x == n - 1:
+                continue
+            for _ in range(r - 1):
+                x = pow(x, 2, n)
+                if x == n - 1:
+                    break
+            else:
                 return False
         return True
     
-    def getPrimes(n):
+    def getPrimes(n, bits):
         primes = []
-        while len(primes) < 2:
-            prime = random.randint(int(10e9), int(10e15))
-            if RSA.checkPrime(prime):
-                primes.append(prime)
+        while len(primes) < n:
+            candidate = random.getrandbits(bits) | 1 
+            if RSA.checkPrime(candidate):
+                primes.append(candidate)
         return primes
 
     def getE(phi):
         e = 65537
-        while( gcd(e, phi) != 1 ):
-            e = random.randint(2, phi)
-        return e
+        if RSA.gcd(e, phi) == 1:
+            return e
+        
+        e = 3
+        while e < phi:
+            if RSA.gcd(e, phi) == 1:
+                return e
+            e += 2
+        raise Exception('No e found')
     
     def modInv(e , phi):
-        def egcd(a, b):
-            if a == 0:
-                return b, 0, 1
-            x, y, z = egcd(b % a, a)
-            return x, z - (b // a) * y, y
-        x, y, _ = egcd(e, phi)
-        return y % phi if x == 1 else None
+        m0, x0, x1 = phi, 0, 1
+        while e > 1:
+            q = e // phi
+            e, phi = phi, e % phi
+            x0, x1 = x1 - q * x0, x0
+        return x1 + m0 if x1 < 0 else x1
+    
+    def gcd(a, b):
+        while b != 0:
+            a, b = b , a % b
+        return a 
     
     def xor_bytes(a, b):
         return bytes(x ^ y for x, y in zip(a,b))
@@ -151,3 +190,153 @@ class RSA:
 
         orig_len = int.from_bytes(decrypted[:4], 'big')
         return decrypted[4:4+orig_len]
+    
+    def encryptFileCBC(filename, keypair):
+        png = PNG(filename)
+        png_name = os.path.basename(filename)
+        crit_chunks = png.getCriticalChunks()
+        anc_chunks = png.getAncillaryChunks()
+        idat_chunks, crit_chunks_no_idat = png.getDataChunks(crit_chunks)
+        pubkey = keypair[0]
+
+        block_size = (pubkey[0].bit_length() + 7) // 8
+        iv = random.randbytes(block_size)
+
+        orig_data = []
+        encrypted_idat_chunks = []
+        for idat in idat_chunks:
+            idat_data = idat[8:-4]
+            orig_data.append(idat_data)
+
+            encrypted_data = RSA.encryptCBC(idat_data, pubkey, iv)
+            
+            new_chunk = PNG.buildNewIDAT(encrypted_data)
+            encrypted_idat_chunks.append(new_chunk)
+
+        all_chunks = png.buildFromChunks(
+            anc_chunks, crit_chunks_no_idat, encrypted_idat_chunks)
+
+        timestamp = RSA.getTimeStamp()
+        encrypt_path = RSA.writeEncrypted(all_chunks, png_name, timestamp)
+        keyfile_path = RSA.saveKeys(keypair, png_name, timestamp)
+        return (encrypt_path, keyfile_path, iv)
+    
+    def decryptFileCBC(filename, keyfile, iv):
+        keys = RSA.loadKeys(keyfile)
+        privkey = keys[1]
+
+        png = PNG(filename)
+        png_name = os.path.basename(filename)
+        crit_chunks = png.getCriticalChunks()
+        anc_chunks = png.getAncillaryChunks()
+        encrypted_idat_chunks, crit_chunks_no_idat = png.getDataChunks(crit_chunks)
+
+        decrypted_idat_chunks = []
+        for chunk in encrypted_idat_chunks:
+            chunk_data = chunk[8:-4]
+            decrypted_chunk_data = RSA.decryptCBC(chunk_data, privkey, iv)
+
+            new_chunk = PNG.buildNewIDAT(decrypted_chunk_data)
+
+            decrypted_idat_chunks.append(new_chunk)
+
+
+        all_chunks = png.buildFromChunks(
+            anc_chunks, crit_chunks_no_idat, decrypted_idat_chunks)
+
+        decrypted_png_name = RSA.writeDecrypted(all_chunks, png_name)
+        return decrypted_png_name
+
+    def encryptFileECB(filename, keypair):
+        png = PNG(filename)
+        png_name = os.path.basename(filename)
+        crit_chunks = png.getCriticalChunks()
+        anc_chunks = png.getAncillaryChunks()
+        idat_chunks, crit_chunks_no_idat = png.getDataChunks(crit_chunks)
+        pubkey = keypair[0]
+
+        encrypted_idat_chunks = []
+        for idat in idat_chunks:
+            idat_data = idat[8:-4]
+            encrypted_data = RSA.encryptECB(idat_data, pubkey)
+            new_chunk = PNG.buildNewIDAT(encrypted_data)
+            encrypted_idat_chunks.append(new_chunk)
+            
+        all_chunks = png.buildFromChunks(
+            anc_chunks, crit_chunks_no_idat, encrypted_idat_chunks)
+
+        timestamp = RSA.getTimeStamp()
+        encrypt_path = RSA.writeEncrypted(all_chunks, png_name, timestamp)
+        keyfile_path = RSA.saveKeys(keypair, png_name, timestamp)
+        return (encrypt_path, keyfile_path)
+    
+    def decryptFileECB(filename, keyfile):
+        keys = RSA.loadKeys(keyfile)
+        privkey = keys[1]
+
+        png = PNG(filename)
+        png_name = os.path.basename(filename)
+        crit_chunks = png.getCriticalChunks()
+        anc_chunks = png.getAncillaryChunks()
+        encrypted_idat_chunks, crit_chunks_no_idat = png.getDataChunks(crit_chunks)
+
+        decrypted_idat_chunks = []
+        for chunk in encrypted_idat_chunks:
+            chunk_data = chunk[8:-4]
+            decrypted_data = RSA.decryptECB(chunk_data, privkey)
+            new_chunk = PNG.buildNewIDAT(decrypted_data)
+            decrypted_idat_chunks.append(new_chunk)
+
+        all_chunks = png.buildFromChunks(
+            anc_chunks, crit_chunks_no_idat, decrypted_idat_chunks)
+
+        decrypted_png_name = RSA.writeDecrypted(all_chunks, png_name)
+        return decrypted_png_name
+
+    @staticmethod
+    def writeEncrypted(data, name, timestamp):
+        filename_no_ext = os.path.basename(name[:-4])
+        os.makedirs("files", exist_ok=True)
+        new_name = f"files/{timestamp}_{filename_no_ext}_encrypted.png"
+        with open(new_name, 'wb') as new_file:
+            for chunk in data:
+                new_file.write(chunk)
+        return new_name
+
+    @staticmethod
+    def writeDecrypted(data, name):
+        filename_no_ext = os.path.basename(name[:-14])
+        new_name = f"files/{filename_no_ext}_decrypted.png"
+        with open(new_name, 'wb') as new_file:
+            for chunk in data:
+                new_file.write(chunk)
+        return new_name
+
+    @staticmethod
+    def saveKeys(keys, name, timestamp):
+        filename_no_ext = name[:-4]
+        new_name = f"files/{timestamp}_{filename_no_ext}_keys.txt"
+        pubkey = keys[0]
+        privkey = keys[1]
+        with open(new_name, 'w') as new_file:
+            new_file.write(f"Public key:\n{pubkey[0]}\n{pubkey[1]}\n")
+            new_file.write(f"Private key:\n{privkey[0]}\n{privkey[1]}\n")
+        return new_name
+
+    @staticmethod
+    def loadKeys(filename):
+        with open(filename, 'r') as keyfile:
+            lines = keyfile.readlines()
+            n_pub = int(lines[1])
+            e_pub = int(lines[2])
+            d_priv = int(lines[4])
+            e_priv = int(lines[5])
+
+            pubkey = (n_pub, e_pub)
+            privkey = (d_priv, e_priv)
+
+            return (pubkey, privkey)  
+
+    @staticmethod
+    def getTimeStamp():
+        return '{:%Y%m%d%H%M%S}'.format(datetime.datetime.now())

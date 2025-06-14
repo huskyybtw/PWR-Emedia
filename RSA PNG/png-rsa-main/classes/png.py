@@ -341,4 +341,33 @@ class PNG:
         phase_spectrum = np.angle(F_shift)
         return mag_spectrum, phase_spectrum
 
+    def buildFromChunks(self, anc_chunks, crit_no_idat, idat, write = False, filename = None):
+        crit_no_idat.insert(0, self.png_signature)
+        for chunk in idat + anc_chunks:
+            crit_no_idat.insert(-1, chunk)
+        all_chunks = crit_no_idat
 
+        if write and filename:
+                self.saveFile(filename, all_chunks)
+        elif write and filename is None:
+            print('No filename provided')
+
+        return all_chunks
+    
+    def saveFile(self, filename, data):
+            with open(filename, 'wb') as new_file:
+                for chunk in data:
+                    new_file.write(chunk)
+            return filename
+    
+    @staticmethod
+    def buildNewIDAT(data):
+        idat_type = b'IDAT'
+        new_len = len(data).to_bytes(4, 'big')
+        new_crc = struct.pack('>I', zlib.crc32(idat_type + data))
+        new_chunk = new_len + idat_type + data + new_crc
+        return new_chunk
+    
+    @staticmethod
+    def concatDataChunks(chunks):
+        return b''.join(chunk[8:-4] for chunk in chunks)
