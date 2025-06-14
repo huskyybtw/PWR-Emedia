@@ -209,6 +209,10 @@ class RSA:
             idat_data = idat[8:-4]
             orig_data.append(idat_data)
 
+            try:
+                idat_data = zlib.decompress(idat_data)
+            except zlib.error:
+                pass
             encrypted_data = RSA.encryptCBC(idat_data, pubkey, iv)
             compressed_encrypted = zlib.compress(encrypted_data)
             new_chunk = PNG.buildNewIDAT(compressed_encrypted)
@@ -219,8 +223,8 @@ class RSA:
             anc_chunks, crit_chunks_no_idat, encrypted_idat_chunks)
 
         timestamp = RSA.getTimeStamp()
-        encrypt_path = RSA.writeEncrypted(all_chunks, png_name, timestamp)
-        keyfile_path = RSA.saveKeys(keypair, png_name, timestamp)
+        encrypt_path = RSA.writeEncrypted(all_chunks, png_name, "CBC")
+        keyfile_path = RSA.saveKeys(keypair, png_name, "CBC")
         return (encrypt_path, keyfile_path, iv)
     
     def decryptFileCBC(filename, keyfile, iv):
@@ -238,8 +242,7 @@ class RSA:
             chunk_data = chunk[8:-4]
             decompressed_data = zlib.decompress(chunk_data)
             decrypted_chunk_data = RSA.decryptCBC(decompressed_data, privkey, iv)
-
-
+            decrypted_chunk_data = zlib.compress(decrypted_chunk_data)
             new_chunk = PNG.buildNewIDAT(decrypted_chunk_data)
 
             decrypted_idat_chunks.append(new_chunk)
@@ -262,6 +265,10 @@ class RSA:
         encrypted_idat_chunks = []
         for idat in idat_chunks:
             idat_data = idat[8:-4]
+            try:
+                idat_data = zlib.decompress(idat_data)
+            except zlib.error:
+                pass
             encrypted_data = RSA.encryptECB(idat_data, pubkey)
             compressed_encrypted = zlib.compress(encrypted_data)
             new_chunk = PNG.buildNewIDAT(compressed_encrypted)
@@ -271,8 +278,8 @@ class RSA:
             anc_chunks, crit_chunks_no_idat, encrypted_idat_chunks)
 
         timestamp = RSA.getTimeStamp()
-        encrypt_path = RSA.writeEncrypted(all_chunks, png_name, timestamp)
-        keyfile_path = RSA.saveKeys(keypair, png_name, timestamp)
+        encrypt_path = RSA.writeEncrypted(all_chunks, png_name, "ECB")
+        keyfile_path = RSA.saveKeys(keypair, png_name, "ECB")
         return (encrypt_path, keyfile_path)
     
     def decryptFileECB(filename, keyfile):
@@ -290,6 +297,7 @@ class RSA:
             chunk_data = chunk[8:-4]
             decompressed_data = zlib.decompress(chunk_data)
             decrypted_data = RSA.decryptECB(decompressed_data, privkey)
+            decrypted_data = zlib.compress(decrypted_data)
             new_chunk = PNG.buildNewIDAT(decrypted_data)
             decrypted_idat_chunks.append(new_chunk)
 
