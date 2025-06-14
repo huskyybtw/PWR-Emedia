@@ -1,6 +1,7 @@
 import os
 import random
 import datetime
+import zlib
 from classes.png import PNG
 
 class RSA:
@@ -209,8 +210,9 @@ class RSA:
             orig_data.append(idat_data)
 
             encrypted_data = RSA.encryptCBC(idat_data, pubkey, iv)
-            
-            new_chunk = PNG.buildNewIDAT(encrypted_data)
+            compressed_encrypted = zlib.compress(encrypted_data)
+            new_chunk = PNG.buildNewIDAT(compressed_encrypted)
+
             encrypted_idat_chunks.append(new_chunk)
 
         all_chunks = png.buildFromChunks(
@@ -234,7 +236,9 @@ class RSA:
         decrypted_idat_chunks = []
         for chunk in encrypted_idat_chunks:
             chunk_data = chunk[8:-4]
-            decrypted_chunk_data = RSA.decryptCBC(chunk_data, privkey, iv)
+            decompressed_data = zlib.decompress(chunk_data)
+            decrypted_chunk_data = RSA.decryptCBC(decompressed_data, privkey, iv)
+
 
             new_chunk = PNG.buildNewIDAT(decrypted_chunk_data)
 
@@ -259,7 +263,8 @@ class RSA:
         for idat in idat_chunks:
             idat_data = idat[8:-4]
             encrypted_data = RSA.encryptECB(idat_data, pubkey)
-            new_chunk = PNG.buildNewIDAT(encrypted_data)
+            compressed_encrypted = zlib.compress(encrypted_data)
+            new_chunk = PNG.buildNewIDAT(compressed_encrypted)
             encrypted_idat_chunks.append(new_chunk)
             
         all_chunks = png.buildFromChunks(
@@ -283,7 +288,8 @@ class RSA:
         decrypted_idat_chunks = []
         for chunk in encrypted_idat_chunks:
             chunk_data = chunk[8:-4]
-            decrypted_data = RSA.decryptECB(chunk_data, privkey)
+            decompressed_data = zlib.decompress(chunk_data)
+            decrypted_data = RSA.decryptECB(decompressed_data, privkey)
             new_chunk = PNG.buildNewIDAT(decrypted_data)
             decrypted_idat_chunks.append(new_chunk)
 
